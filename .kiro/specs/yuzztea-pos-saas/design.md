@@ -291,7 +291,7 @@ interface InventoryRepository {
 }
 ```
 
-Mutasi sensitif (transaksi + pengurangan stok, refund + pengembalian stok) dipanggil melalui **Postgres Function** (`SECURITY DEFINER`) sehingga atomicity dijamin di server (Req 7.7, 7.10, 6.4).
+Mutasi sensitif (transaksi + pengurangan stok, refund + pengembalian stok, perubahan harga + penyimpanan riwayat harga) dipanggil melalui **Postgres Function** (`SECURITY DEFINER`) sehingga atomicity dijamin di server (Req 7.7, 7.10, 6.4, 5.7, 5.9). Kegagalan langkah turunan (mis. trigger Inventory_System gagal di-fire saat konfirmasi transaksi, atau penyimpanan riwayat harga gagal saat perubahan harga) menyebabkan rollback seluruh perubahan dalam panggilan fungsi tersebut.
 
 ### Feature Modules (UI + Hooks)
 
@@ -602,9 +602,9 @@ Properti di bawah merupakan hasil **prework analysis + property reflection** ata
 
 **Validates: Requirements 7.5, 7.6**
 
-### Property 3: Stock deduction round-trip with refund
+### Property 3: Stock deduction round-trip with refund and trigger-failure rollback
 
-*For any* `stock` snapshot, `recipes` valid, dan keranjang `lines`, jika `applyDeduction(stock, requiredMaterials(recipes, lines))` menghasilkan `stock'` lalu `applyRefund(stock', requiredMaterials(recipes, lines))` dijalankan, hasilnya harus identik dengan `stock` semula untuk seluruh `raw_material_id`.
+*For any* `stock` snapshot, `recipes` valid, dan keranjang `lines`, jika `applyDeduction(stock, requiredMaterials(recipes, lines))` menghasilkan `stock'` lalu `applyRefund(stock', requiredMaterials(recipes, lines))` dijalankan, hasilnya harus identik dengan `stock` semula untuk seluruh `raw_material_id`. Selain itu, jika `triggerInventoryUpdate` mengembalikan kegagalan **sebelum** deduksi dimulai, `confirmTransaction` harus mengembalikan `Result.error` dan tidak menulis Transaction berstatus `confirmed` (rollback penuh, Req 7.7).
 
 **Validates: Requirements 6.4, 7.7, 7.10**
 
@@ -653,13 +653,13 @@ Untuk semua kombinasi lain, predikat mengembalikan `false`.
 
 ### Property 9: Reconnect backoff schedule
 
-*For any* nomor percobaan `attempt ∈ [1..10]`, fungsi `nextReconnectDelay(attempt)` harus mengembalikan urutan `[1000, 2000, 4000, 8000, 16000, 30000, 30000, 30000, 30000, 30000]` dalam ms; untuk `attempt > 10`, fungsi mengembalikan `null` dan state machine berpindah ke `disconnected_terminal`.
+*For any* nomor percobaan `attempt ∈ [1..10]`, fungsi `nextReconnectDelay(attempt)` harus mengembalikan urutan `[1000, 2000, 4000, 8000, 16000, 30000, 30000, 30000, 30000, 30000]` dalam ms; untuk `attempt > 10`, fungsi mengembalikan `null` dan state machine berpindah ke `disconnected_terminal`. Transisi ke `disconnected_terminal` murni didorong oleh jumlah percobaan otomatis yang mencapai 10 tanpa membedakan jenis kegagalan (timeout, error autentikasi, server shutdown, payload invalid, dsb.) — Req 10.5.
 
 **Validates: Requirements 10.4, 10.5**
 
 ### Property 10: Realtime payload safety
 
-*For any* payload realtime sembarang (termasuk yang invalid menurut skema Zod), `handlePayload(state, payload)` harus mengembalikan `state` tanpa perubahan jika payload gagal validasi, dan harus memanggil logger error tepat satu kali.
+*For any* payload realtime sembarang (termasuk yang invalid menurut skema Zod), `handlePayload(state, payload)` harus mengembalikan `state` tanpa perubahan jika payload gagal validasi, dan harus mencoba memanggil logger error tepat satu kali. Jika logger sendiri melempar error, `handlePayload` tetap mengembalikan `state` tanpa perubahan dan tidak men-throw, sehingga stabilitas sistem diutamakan di atas pencatatan error (Req 10.7).
 
 **Validates: Requirements 10.7**
 
@@ -668,8 +668,10 @@ Untuk semua kombinasi lain, predikat mengembalikan `false`.
 *For any* antrian `pending_sync` dan transaksi baru `tx`:
 - jika `queue.length < 500` → `enqueue(queue, tx).length = queue.length + 1`;
 - jika `queue.length = 500` → `enqueue` menolak dan mengembalikan `queue` tanpa perubahan;
+- semua transaksi yang `enqueue`-able harus berstatus `pending_sync`; transaksi dengan status lain ditolak (Req 11.2);
 - `nextBatch(queue)` mengembalikan transaksi terurut menaik berdasarkan `created_at`;
-- transaksi dengan `retryCount >= 5` tidak dipilih oleh `shouldRetry`.
+- transaksi dengan `retryCount >= 5` tidak dipilih oleh `shouldRetry`;
+- `markRetry(tx)` mengembalikan `tx'` dengan `retryCount' = min(tx.retryCount + 1, 5)` sehingga retry counter tidak pernah meningkat di atas 5 (Req 11.4).
 
 **Validates: Requirements 11.2, 11.3, 11.4, 11.6, 11.7**
 
@@ -681,9 +683,9 @@ Untuk semua kombinasi lain, predikat mengembalikan `false`.
 
 ### Property 13: Receipt content and width compliance
 
-*For any* `ReceiptInput` valid dan width `w ∈ {58, 80}`, output `formatReceipt(input, w)` harus mengandung secara berurutan: nama outlet, alamat outlet, ID transaksi, timestamp dalam format `DD/MM/YYYY HH:mm:ss` zona Asia/Jakarta, setiap line `(name, qty, unitPrice, subtotal)` yang tertulis dengan format Rupiah `Rp` tanpa desimal, total, metode bayar, jumlah bayar, kembalian, dan nama kasir; dan setiap baris output harus memiliki panjang `<= cols(w)` (32 untuk 58 mm, 48 untuk 80 mm).
+*For any* `ReceiptInput` valid dan width `w ∈ {58, 80}`, output `formatReceipt(input, w)` harus mengandung secara berurutan: nama outlet, alamat outlet, ID transaksi, timestamp dalam format `DD/MM/YYYY HH:mm:ss` zona Asia/Jakarta, setiap line `(name, qty, unitPrice, subtotal)` yang tertulis dengan format Rupiah `Rp` tanpa desimal, total, metode bayar, jumlah bayar, kembalian, dan nama kasir; dan setiap baris output harus memiliki panjang `<= cols(w)` (32 untuk 58 mm, 48 untuk 80 mm). Untuk **setiap** input numerik mata uang yang diberikan, `formatRupiah` harus berhasil mengembalikan string non-empty; jika `formatRupiah` mengembalikan kegagalan untuk salah satu field harga, subtotal, diskon, pajak, total, jumlah bayar, atau kembalian, `formatReceipt` harus mengembalikan `Result.error('CURRENCY_FORMAT_FAILED')` tanpa menghasilkan teks Receipt parsial (Req 8.9).
 
-**Validates: Requirements 8.1, 8.2, 8.3**
+**Validates: Requirements 8.1, 8.2, 8.3, 8.9**
 
 ### Property 14: Reprint preserves content
 
@@ -735,7 +737,7 @@ Untuk semua kombinasi lain, predikat mengembalikan `false`.
 
 ### Property 22: Audit entry construction
 
-*For any* aksi `(now, user, role, outletId?, action_type, entity, entityId, valueBefore, valueAfter)`, `buildAuditEntry(...)` harus menghasilkan entri berisi seluruh field di atas dengan `timestamp` berformat ISO 8601 zona Asia/Jakarta, `value_before` dan `value_after` ter-truncate ke 2000 karakter, dan `id` UUID v4/v7 unik. Entri tidak boleh berisi referensi password atau token.
+*For any* aksi `(now, user, role, outletId?, action_type, entity, entityId, valueBefore, valueAfter)`, `buildAuditEntry(...)` harus menghasilkan entri berisi seluruh field di atas dengan `timestamp` berformat ISO 8601 zona Asia/Jakarta, `value_before` dan `value_after` ter-truncate ke 2000 karakter, dan `id` UUID v4/v7 unik. Entri tidak boleh berisi referensi password atau token. Konstruksi entri harus berhasil terlepas dari apakah pengguna memiliki izin akses atau aksi ditolak oleh Authorization_System; flag `accessDenied` (opsional) dapat ditambahkan ke `value_after` namun tidak menggagalkan konstruksi (Req 14.1).
 
 **Validates: Requirements 14.1, 14.2, 2.8, 3.5, 5.7**
 
@@ -781,7 +783,7 @@ Tabel ringkas untuk audit cakupan; baris diurutkan menurut nomor properti.
 | P10 | Realtime payload safety | 10.7 |
 | P11 | Sync queue invariants | 11.2, 11.3, 11.4, 11.6, 11.7 |
 | P12 | Price conflict resolution | 11.5 |
-| P13 | Receipt content & width compliance | 8.1, 8.2, 8.3 |
+| P13 | Receipt content & width compliance | 8.1, 8.2, 8.3, 8.9 |
 | P14 | Reprint preserves content | 8.8 |
 | P15 | Print failure preserves transaction | 8.5, 8.6, 8.7 |
 | P16 | Entity validators (Zod) | 3.2, 3.3, 4.1, 4.3, 4.4, 5.1, 5.2, 6.1, 6.2, 6.3, 6.6, 6.7, 6.8, 8.6, 9.2, 9.3, 14.3, 14.4 |
@@ -796,7 +798,7 @@ Tabel ringkas untuk audit cakupan; baris diurutkan menurut nomor properti.
 | P25 | Form draft retention across breakpoints | 12.7 |
 | P26 | Storage hygiene | 1.4, 15.4, 15.5, 15.6 |
 
-**Cakupan integration / smoke (di luar PBT)**: 1.1 (Auth SLA), 1.2 (pesan generik), 2.1 (enum role), 2.7 (RLS), 2.9 (propagasi role), 3.1 (CRUD SLA), 3.6 (skala outlet), 4.6 (session lifecycle), 4.7 (nonaktifkan akun), 5.6 (realtime SLA), 6.4 (atomicity SQL), 6.5 (notifikasi SLA), 7.1 (POS load SLA), 7.3 (enum metode bayar), 7.9 (cancel cart), 9.5 (UI scoping), 9.9 (export gagal), 9.10 (perf laporan), 10.1, 10.2, 10.3, 10.6 (realtime SLA), 11.1 (cache offline), 12.1-12.5 (responsif), 13.1, 13.4, 13.5, 13.6 (visual + CSS), 14.6 (audit immutable + retensi), 15.1 (bundle audit), 15.2 (RLS), 15.3 (HTTPS).
+**Cakupan integration / smoke (di luar PBT)**: 1.1 (Auth SLA), 1.2 (pesan generik), 2.1 (enum role), 2.7 (RLS), 2.9 (propagasi role), 2.10 (propagasi timeout rollback), 3.1 (CRUD SLA), 3.6 (skala outlet), 3.7 (duplikasi kode outlet — DB constraint), 4.6 (session lifecycle), 4.7 (nonaktifkan akun), 5.6 (realtime SLA), 5.9 (price history rollback SQL), 6.4 (atomicity SQL), 6.5 (notifikasi SLA), 7.1 (POS load SLA), 7.3 (enum metode bayar), 7.7 (inventory trigger fire failure rollback SQL), 7.9 (cancel cart), 9.5 (UI scoping), 9.9 (export gagal), 9.10 (perf laporan), 10.1, 10.2, 10.3, 10.6 (realtime SLA), 11.1 (cache offline), 12.1-12.5 (responsif), 13.1, 13.4, 13.5, 13.6 (visual + CSS), 14.6 (audit immutable + retensi), 15.1 (bundle audit), 15.2 (RLS), 15.3 (HTTPS).
 
 ---
 
@@ -822,6 +824,9 @@ Tabel ringkas untuk audit cakupan; baris diurutkan menurut nomor properti.
 - **Error Boundary** di tingkat layout menampilkan layar fallback dan tombol "Muat ulang" jika render error.
 - **RPC `record_audit`** memanggil dengan parameter terkontrol; kegagalan logging tidak membatalkan operasi pengguna kecuali untuk operasi audit-required (refund).
 - **Refund flow**: jika `applyRefundInDb` gagal, transaksi tetap pada status semula dan UI menampilkan instruksi mencoba ulang; tidak ada partial state.
+- **Inventory trigger fire failure (Req 7.7)**: `create_transaction` SECURITY DEFINER memanggil deduksi stok dalam transaksi yang sama; jika trigger gagal di-fire (mis. function tidak dapat dipanggil, network timeout sebelum dispatch), seluruh transaksi di-rollback dan klien menerima `Result.error('INVENTORY_TRIGGER_FAILED')`. Berbeda dengan Req 7.8, kasus ini tidak menyisakan Transaction berstatus `pending_reconciliation`.
+- **Price history save failure (Req 5.9)**: `update_menu_price` SECURITY DEFINER menggabungkan `UPDATE menu_item.base_price` dan `INSERT menu_price_history` dalam satu transaksi Postgres; kegagalan insert riwayat menyebabkan rollback `UPDATE` sehingga harga lama dipertahankan dan klien menerima `Result.error('PRICE_HISTORY_FAILED')`.
+- **Authorization propagation timeout (Req 2.10)**: setelah `update_user_role_and_assignments`, klien melakukan polling cache propagation maksimum 60 detik; jika tidak terdeteksi dalam batas waktu tersebut, klien memanggil `revert_user_role_and_assignments` (SECURITY DEFINER) dan menampilkan pesan kegagalan propagasi.
 
 ### Receipt and Print Failures
 

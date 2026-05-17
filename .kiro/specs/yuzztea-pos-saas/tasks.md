@@ -39,9 +39,9 @@ Setiap task merujuk ke requirement (Req X.Y) dan, untuk property test, ke nomor 
 
 - [ ] 2. Supabase backend: schema, RLS, dan SECURITY DEFINER functions
   - [ ] 2.1 Skema migrasi awal (organization, outlet, user_profile, outlet_assignment)
-    - File `supabase/migrations/0001_init.sql` membuat tabel organization, outlet (cek `close_time > open_time`, kode unik dalam org), user_profile (enum role), outlet_assignment, indeks pada `outlet_id`, `user_id`, `organization_id`
+    - File `supabase/migrations/0001_init.sql` membuat tabel organization, outlet (cek `close_time > open_time`, kode unik dalam org via `UNIQUE (organization_id, code)` constraint untuk memberikan error duplikasi terpisah dari validasi field lain — Req 3.7), user_profile (enum role), outlet_assignment, indeks pada `outlet_id`, `user_id`, `organization_id`
     - Trigger `updated_at` otomatis
-    - _Requirements: 2.1, 3.2, 3.6, 4.1_
+    - _Requirements: 2.1, 3.2, 3.6, 3.7, 4.1_
   - [ ] 2.2 Skema menu, recipe, raw_material, dan stock
     - File `supabase/migrations/0002_menu_inventory.sql`: menu_item, menu_item_outlet (overlay PK), menu_price_history, raw_material, raw_material_stock (PK komposit), recipe_ingredient (cek 1..50 per menu), outlet_hours_history
     - Constraint check pada `base_price` (0..10_000_000), `qty_per_unit` (>0..999_999.99), `quantity` numeric(10,2)
@@ -56,15 +56,18 @@ Setiap task merujuk ke requirement (Req X.Y) dan, untuk property test, ke nomor 
     - Test SQL fixture mendemonstrasikan isolasi (digunakan integration test)
     - _Requirements: 2.2, 2.3, 2.4, 2.7, 2.8, 14.5, 14.6, 15.2_
   - [ ] 2.5 SECURITY DEFINER functions untuk operasi atomic
-    - `create_transaction(payload jsonb)`: insert tx + tx_lines + dec stok + insert audit (jika refund) dalam satu transaksi; mengembalikan id tx atau error spesifik
+    - `create_transaction(payload jsonb)`: insert tx + tx_lines + dec stok + insert audit (jika refund) dalam satu transaksi; mengembalikan id tx atau error spesifik. Jika trigger Inventory_System gagal di-fire (tidak dapat dipanggil sama sekali), seluruh transaksi di-rollback dan return `INVENTORY_TRIGGER_FAILED` (Req 7.7).
     - `refund_transaction(tx_id uuid)`: cek 24h window + status confirmed + belum refunded; insert refund, ubah status, kembalikan stok, insert audit
-    - `record_audit(payload jsonb)`: insert ke audit_log dengan validasi (entity, action_type whitelist), truncate value_before/value_after ke 2000 char
+    - `update_menu_price(menu_item_id uuid, outlet_id uuid?, new_price int)`: UPDATE harga dan INSERT menu_price_history dalam satu transaksi Postgres; rollback UPDATE jika INSERT history gagal (Req 5.7, 5.9)
+    - `update_user_role_and_assignments(user_id uuid, role text, outlet_ids uuid[])` + `revert_user_role_and_assignments(user_id uuid, snapshot jsonb)`: pasangan apply/revert untuk propagasi 60s timeout (Req 2.10)
+    - `record_audit(payload jsonb)`: insert ke audit_log dengan validasi (entity, action_type whitelist), truncate value_before/value_after ke 2000 char; **selalu** menerima entri terlepas dari `accessDenied` flag (Req 14.1)
     - `log_unauthorized_outlet_attempt(outlet_id uuid, action text)` insert audit "auth.unauthorized_outlet"
-    - _Requirements: 6.4, 7.7, 7.8, 7.10, 7.11, 14.1, 14.2, 14.6, 2.8_
+    - _Requirements: 2.10, 5.7, 5.9, 6.4, 7.7, 7.8, 7.10, 7.11, 14.1, 14.2, 14.6, 2.8_
   - [ ] 2.6 Trigger menu price history dan outlet hours history
     - Trigger `BEFORE UPDATE` pada `menu_item` / `menu_item_outlet` insert ke `menu_price_history` jika harga berubah; retensi 24 bulan via cron pg_cron atau view `WHERE effective_at >= now() - interval '24 months'`
+    - Catatan: untuk perubahan harga, gunakan RPC `update_menu_price` (lihat task 2.5) yang membungkus UPDATE + INSERT menu_price_history dalam satu transaksi sehingga kegagalan INSERT membatalkan UPDATE (Req 5.9). Trigger digunakan sebagai safety net jika UPDATE dilakukan langsung di tabel.
     - Trigger pada `outlet` saat jam berubah → insert `outlet_hours_history` (retensi 365 hari)
-    - _Requirements: 3.5, 5.7_
+    - _Requirements: 3.5, 5.7, 5.9_
   - [ ] 2.7 Realtime publication setup
     - `ALTER PUBLICATION supabase_realtime ADD TABLE transaction, transaction_line, raw_material_stock, menu_item_outlet, menu_item;`
     - Pastikan replikasi mengikuti RLS via row filter publication (Postgres 15+)
@@ -143,15 +146,16 @@ Setiap task merujuk ke requirement (Req X.Y) dan, untuk property test, ke nomor 
 
 - [ ] 7. Domain - Receipt Formatter
   - [ ] 7.1 Implementasi `receiptFormatter.ts`
-    - `formatRupiah(n)` locale id-ID tanpa desimal, `formatJakartaTime(d)` `DD/MM/YYYY HH:mm:ss`
+    - `formatRupiah(n)` locale id-ID tanpa desimal, mengembalikan `Result<string, 'CURRENCY_FORMAT_FAILED'>`; `formatJakartaTime(d)` `DD/MM/YYYY HH:mm:ss`
     - `formatReceipt(input, width: 58|58|80)` produce teks deterministik 32 cols (58mm) / 48 cols (80mm), word-aware wrap, label `REPRINT` + timestamp jika `reprint` ada (Req 8.8)
-    - _Requirements: 8.1, 8.2, 8.3, 8.8_
+    - `formatReceipt` mengembalikan `Result.error('CURRENCY_FORMAT_FAILED')` tanpa teks parsial jika salah satu nilai mata uang gagal diformat (Req 8.9)
+    - _Requirements: 8.1, 8.2, 8.3, 8.8, 8.9_
   - [ ] 7.2 Implementasi `receiptShare.ts` & `printFailure.ts` (Property 15)
     - `validateContact({whatsapp?, email?})` schema; `buildWaShareUrl`, `buildMailtoUrl`
     - `handlePrintFailure(tx)` → `{tx, action:'savePdf'}` tanpa mengubah `tx.status`
     - _Requirements: 8.5, 8.6, 8.7_
   - [ ]* 7.3 Property tests receipt (Properties 13, 14, 15)
-    - **Property 13: Receipt content & width compliance** — Validates: Requirements 8.1, 8.2, 8.3
+    - **Property 13: Receipt content & width compliance** — Validates: Requirements 8.1, 8.2, 8.3, 8.9
     - **Property 14: Reprint preserves content** — Validates: Requirements 8.8
     - **Property 15: Print failure preserves transaction** — Validates: Requirements 8.5, 8.6, 8.7
     - File: `src/domain/receipt/__tests__/receipt.property.test.ts`
@@ -222,8 +226,8 @@ Setiap task merujuk ke requirement (Req X.Y) dan, untuk property test, ke nomor 
     - CRUD via PostgREST, validasi via schema task 3.1; fungsi `setActive`, `assignOutlets`
     - _Requirements: 3.1, 3.2, 3.3, 4.1-4.5_
   - [ ] 11.5 Repository: MenuItem + MenuItemOutlet overlay + price history
-    - `list(outletId)` join overlay; `setPrice(menuItemId, outletId?, price)` (memicu history via trigger); `delete(menuItemId)` panggil `canDeleteMenuItem` lebih dulu
-    - _Requirements: 5.1-5.8_
+    - `list(outletId)` join overlay; `setPrice(menuItemId, outletId?, price)` memanggil RPC `update_menu_price` (atomic UPDATE + INSERT history; rollback otomatis jika INSERT gagal — Req 5.7, 5.9); `delete(menuItemId)` panggil `canDeleteMenuItem` lebih dulu
+    - _Requirements: 5.1-5.9_
   - [ ] 11.6 Repository: RawMaterial, Stock, Recipe, Receiving, Opname
     - Operasi receiving/opname memanggil RPC SECURITY DEFINER; `getStock(outletId)`, `lowStock(outletId)` query
     - _Requirements: 6.1-6.9_
@@ -341,7 +345,9 @@ Setiap task merujuk ke requirement (Req X.Y) dan, untuk property test, ke nomor 
     - _Requirements: 4.1, 4.2, 4.5_
   - [ ] 17.2 Form create/edit user dengan multi-outlet assignment
     - Validasi `UserDraftSchema` + minimal 1 outlet untuk Manager/Cashier; nonaktifkan akun → invalidasi session ≤ 60s
-    - _Requirements: 4.1, 4.3, 4.4, 4.6, 4.7_
+    - Hanya Owner yang dapat membuat/mengubah/menonaktifkan akun (Req 4.1); Outlet_Manager hanya untuk Cashier pada outlet penugasannya (Req 4.2)
+    - Untuk perubahan peran/penugasan: panggil RPC `update_user_role_and_assignments`, lalu polling propagasi ≤ 60s; jika lewat batas → panggil `revert_user_role_and_assignments` dan tampilkan pesan kegagalan propagasi (Req 2.10)
+    - _Requirements: 2.10, 4.1, 4.3, 4.4, 4.6, 4.7_
   - [ ]* 17.3 Test propagasi assignment ke session berikutnya
     - Manager mengubah Cashier assignment → session aktif tidak berubah; session baru memuat outlet baru ≤ 60s
     - _Requirements: 4.6_
@@ -354,9 +360,9 @@ Setiap task merujuk ke requirement (Req X.Y) dan, untuk property test, ke nomor 
     - Mime/ukuran ≤ 2 MB; preview gambar; alt text; persist ke storage bucket `menu-images`
     - _Requirements: 5.1, 5.2_
   - [ ] 18.3 Edit harga / status per outlet (overlay)
-    - Manager hanya outlet penugasan; trigger menulis `menu_price_history` (Req 5.7)
+    - Manager hanya outlet penugasan; perubahan harga memanggil RPC `update_menu_price` yang atomik membungkus UPDATE + INSERT `menu_price_history` sehingga harga lama dipertahankan jika INSERT history gagal (Req 5.7, 5.9)
     - Realtime: perubahan terlihat di POS ≤ 5s (Req 5.6) via channel manager
-    - _Requirements: 5.4, 5.6, 5.7_
+    - _Requirements: 5.4, 5.6, 5.7, 5.9_
   - [ ] 18.4 Hapus menu — gunakan `canDeleteMenuItem` (Property 18)
     - Tolak jika ada transaksi historis dan sarankan non-aktifkan (Req 5.8)
     - _Requirements: 5.8_
