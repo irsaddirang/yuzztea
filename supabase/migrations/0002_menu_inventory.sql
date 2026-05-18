@@ -10,17 +10,18 @@
 -- Enum Types
 -- =============================================================================
 
--- Closed set of units for raw materials (Req 6.1)
-CREATE TYPE raw_material_unit AS ENUM ('gram', 'ml', 'pcs', 'liter', 'kg');
+CREATE TYPE material_unit AS ENUM ('gram', 'ml', 'pcs', 'liter', 'kg');
 
 -- =============================================================================
 -- Table: menu_item
--- Central menu item definition at organization level (Req 5.1)
+-- Organization-level menu item (Req 5.1)
 -- Constraints:
---   - base_price: integer 0..10_000_000
---   - name: 1-100 chars
---   - category: 1-50 chars
---   - description: 0-500 chars
+--   - name: 1-100 characters
+--   - category: 1-50 characters
+--   - description: 0-500 characters (nullable)
+--   - base_price: integer 0..10,000,000
+--   - image_url: nullable text
+--   - active: boolean (global default)
 -- =============================================================================
 
 CREATE TABLE menu_item (
@@ -43,15 +44,18 @@ CREATE TRIGGER trg_menu_item_updated_at
   FOR EACH ROW
   EXECUTE FUNCTION trigger_set_updated_at();
 
--- Indexes on menu_item
+-- Indexes for menu_item
 CREATE INDEX idx_menu_item_organization_id ON menu_item(organization_id);
-CREATE INDEX idx_menu_item_category ON menu_item(category);
-CREATE INDEX idx_menu_item_active ON menu_item(active);
+CREATE INDEX idx_menu_item_category ON menu_item(organization_id, category);
+CREATE INDEX idx_menu_item_active ON menu_item(organization_id, active);
 
 -- =============================================================================
--- Table: menu_item_outlet (overlay per outlet)
--- Allows per-outlet price override and active status override (Req 5.3, 5.4)
--- Primary key is composite (menu_item_id, outlet_id)
+-- Table: menu_item_outlet
+-- Per-outlet overlay for price and active status (Req 5.3, 5.4)
+-- PK composite: (menu_item_id, outlet_id)
+-- Constraints:
+--   - price_override: nullable integer 0..10,000,000
+--   - active_override: nullable boolean
 -- =============================================================================
 
 CREATE TABLE menu_item_outlet (
@@ -59,18 +63,26 @@ CREATE TABLE menu_item_outlet (
   outlet_id       uuid    NOT NULL REFERENCES outlet(id) ON DELETE CASCADE,
   price_override  integer CHECK (price_override IS NULL OR (price_override >= 0 AND price_override <= 10000000)),
   active_override boolean,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  updated_at      timestamptz NOT NULL DEFAULT now(),
 
   PRIMARY KEY (menu_item_id, outlet_id)
 );
 
--- Index for outlet-based lookups
+-- Trigger: auto-update updated_at on menu_item_outlet
+CREATE TRIGGER trg_menu_item_outlet_updated_at
+  BEFORE UPDATE ON menu_item_outlet
+  FOR EACH ROW
+  EXECUTE FUNCTION trigger_set_updated_at();
+
+-- Index for querying overlays by outlet
 CREATE INDEX idx_menu_item_outlet_outlet_id ON menu_item_outlet(outlet_id);
 
 -- =============================================================================
 -- Table: menu_price_history
 -- Records price changes for audit trail (Req 5.7)
--- Retention: minimum 24 months
--- outlet_id NULL means global (base_price) change
+-- outlet_id nullable: null means global base_price change
+-- Retention: 24 months minimum
 -- =============================================================================
 
 CREATE TABLE menu_price_history (
@@ -79,37 +91,40 @@ CREATE TABLE menu_price_history (
   outlet_id    uuid        REFERENCES outlet(id) ON DELETE SET NULL,
   old_price    integer     NOT NULL,
   new_price    integer     NOT NULL,
-  changed_by   uuid        NOT NULL,
+  changed_by   uuid        NOT NULL REFERENCES user_profile(user_id),
   effective_at timestamptz NOT NULL DEFAULT now()
 );
 
--- Indexes for querying price history
+-- Indexes for menu_price_history
 CREATE INDEX idx_menu_price_history_menu_item_id ON menu_price_history(menu_item_id);
 CREATE INDEX idx_menu_price_history_effective_at ON menu_price_history(effective_at DESC);
 
 -- =============================================================================
 -- Table: raw_material
 -- Organization-level raw material definition (Req 6.1)
+-- Constraints:
+--   - name: 1-100 characters
+--   - unit: enum material_unit (gram, ml, pcs, liter, kg)
 -- =============================================================================
 
 CREATE TABLE raw_material (
-  id              uuid              PRIMARY KEY DEFAULT gen_random_uuid(),
-  organization_id uuid              NOT NULL REFERENCES organization(id) ON DELETE CASCADE,
-  name            text              NOT NULL CHECK (char_length(name) BETWEEN 1 AND 100),
-  unit            raw_material_unit NOT NULL,
-  created_at      timestamptz       NOT NULL DEFAULT now()
+  id              uuid          PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid          NOT NULL REFERENCES organization(id) ON DELETE CASCADE,
+  name            text          NOT NULL CHECK (char_length(name) BETWEEN 1 AND 100),
+  unit            material_unit NOT NULL,
+  created_at      timestamptz   NOT NULL DEFAULT now()
 );
 
--- Index on organization
+-- Index for raw_material
 CREATE INDEX idx_raw_material_organization_id ON raw_material(organization_id);
 
 -- =============================================================================
 -- Table: raw_material_stock
 -- Per-outlet stock tracking (Req 6.1)
--- Primary key is composite (raw_material_id, outlet_id)
+-- PK composite: (raw_material_id, outlet_id)
 -- Constraints:
---   - quantity: numeric(10,2), can go negative per Req 6.9 (stok minus)
---   - min_quantity: numeric(10,2), 0..999_999.99
+--   - quantity: numeric(10,2) — can go negative per Req 6.9 (stok minus)
+--   - min_quantity: numeric(10,2) >= 0, <= 999,999.99
 -- =============================================================================
 
 CREATE TABLE raw_material_stock (
@@ -117,20 +132,20 @@ CREATE TABLE raw_material_stock (
   outlet_id       uuid        NOT NULL REFERENCES outlet(id) ON DELETE CASCADE,
   quantity        numeric(10,2) NOT NULL DEFAULT 0,
   min_quantity    numeric(10,2) NOT NULL DEFAULT 0 CHECK (min_quantity >= 0 AND min_quantity <= 999999.99),
-  updated_at      timestamptz   NOT NULL DEFAULT now(),
+  updated_at      timestamptz NOT NULL DEFAULT now(),
 
   PRIMARY KEY (raw_material_id, outlet_id)
 );
 
--- Index for outlet-based stock lookups
+-- Index for querying stock by outlet
 CREATE INDEX idx_raw_material_stock_outlet_id ON raw_material_stock(outlet_id);
 
 -- =============================================================================
 -- Table: recipe_ingredient
--- Maps menu items to raw materials with quantity per unit (Req 6.2)
--- Primary key is composite (menu_item_id, raw_material_id)
+-- Maps menu_item to raw_material with quantity per unit (Req 6.2)
+-- PK composite: (menu_item_id, raw_material_id)
 -- Constraints:
---   - qty_per_unit: > 0 and <= 999_999.99
+--   - qty_per_unit: numeric(10,2) > 0 AND <= 999,999.99
 --   - Maximum 50 ingredients per menu_item (enforced via trigger)
 -- =============================================================================
 
@@ -142,11 +157,11 @@ CREATE TABLE recipe_ingredient (
   PRIMARY KEY (menu_item_id, raw_material_id)
 );
 
--- Index for raw_material lookups
+-- Index for querying recipes by raw_material
 CREATE INDEX idx_recipe_ingredient_raw_material_id ON recipe_ingredient(raw_material_id);
 
 -- =============================================================================
--- Trigger: Enforce maximum 50 ingredients per menu_item (Req 6.2)
+-- Trigger: enforce maximum 50 ingredients per menu_item (Req 6.2)
 -- =============================================================================
 
 CREATE OR REPLACE FUNCTION check_recipe_ingredient_limit()
@@ -176,20 +191,20 @@ CREATE TRIGGER trg_recipe_ingredient_limit
 -- =============================================================================
 -- Table: outlet_hours_history
 -- Records changes to outlet operating hours (Req 3.5)
--- Retention: minimum 365 days
+-- Retention: 365 days minimum
 -- =============================================================================
 
 CREATE TABLE outlet_hours_history (
-  id            uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
-  outlet_id     uuid        NOT NULL REFERENCES outlet(id) ON DELETE CASCADE,
-  old_open_time time,
-  old_close_time time,
-  new_open_time time,
-  new_close_time time,
-  changed_by    uuid        NOT NULL,
-  changed_at    timestamptz NOT NULL DEFAULT now()
+  id             uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  outlet_id      uuid        NOT NULL REFERENCES outlet(id) ON DELETE CASCADE,
+  old_open_time  time        NOT NULL,
+  old_close_time time        NOT NULL,
+  new_open_time  time        NOT NULL,
+  new_close_time time        NOT NULL,
+  changed_by     uuid        NOT NULL REFERENCES user_profile(user_id),
+  changed_at     timestamptz NOT NULL DEFAULT now()
 );
 
--- Index for outlet-based history lookups
+-- Index for querying hours history by outlet
 CREATE INDEX idx_outlet_hours_history_outlet_id ON outlet_hours_history(outlet_id);
 CREATE INDEX idx_outlet_hours_history_changed_at ON outlet_hours_history(changed_at DESC);

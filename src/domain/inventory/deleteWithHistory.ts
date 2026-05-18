@@ -17,12 +17,12 @@ export type Result<T, E extends string> = { ok: true; value: T } | { ok: false; 
 /**
  * Determine whether a menu item can be deleted based on its transaction history.
  *
- * @param menuItemId - The ID of the menu item to check (used for context/tracing).
+ * @param _menuItemId - The ID of the menu item to check (used for context/tracing).
  * @param transactionCount - Number of historical transactions referencing this menu item.
  * @returns Result<true, 'MENU_HAS_TX_HISTORY'> — success if deletable, error otherwise.
  */
 export function canDeleteMenuItem(
-  menuItemId: string,
+  _menuItemId: string,
   transactionCount: number,
 ): Result<true, 'MENU_HAS_TX_HISTORY'> {
   if (transactionCount > 0) {

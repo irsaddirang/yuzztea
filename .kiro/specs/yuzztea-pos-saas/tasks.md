@@ -37,12 +37,12 @@ Setiap task merujuk ke requirement (Req X.Y) dan, untuk property test, ke nomor 
     - `src/lib/supabase.ts`: factory `createClient` (anon only), throw saat key kosong; **assert** `service_role` tidak ada di import.meta.env
     - _Requirements: 15.1, 15.2_
 
-- [ ] 2. Supabase backend: schema, RLS, dan SECURITY DEFINER functions
+- [x] 2. Supabase backend: schema, RLS, dan SECURITY DEFINER functions
   - [x] 2.1 Skema migrasi awal (organization, outlet, user_profile, outlet_assignment)
     - File `supabase/migrations/0001_init.sql` membuat tabel organization, outlet (cek `close_time > open_time`, kode unik dalam org via `UNIQUE (organization_id, code)` constraint untuk memberikan error duplikasi terpisah dari validasi field lain — Req 3.7), user_profile (enum role), outlet_assignment, indeks pada `outlet_id`, `user_id`, `organization_id`
     - Trigger `updated_at` otomatis
     - _Requirements: 2.1, 3.2, 3.6, 3.7, 4.1_
-  - [ ] 2.2 Skema menu, recipe, raw_material, dan stock
+  - [x] 2.2 Skema menu, recipe, raw_material, dan stock
     - File `supabase/migrations/0002_menu_inventory.sql`: menu_item, menu_item_outlet (overlay PK), menu_price_history, raw_material, raw_material_stock (PK komposit), recipe_ingredient (cek 1..50 per menu), outlet_hours_history
     - Constraint check pada `base_price` (0..10_000_000), `qty_per_unit` (>0..999_999.99), `quantity` numeric(10,2)
     - _Requirements: 3.5, 5.1, 5.7, 6.1, 6.2, 6.3_
@@ -78,16 +78,16 @@ Setiap task merujuk ke requirement (Req X.Y) dan, untuk property test, ke nomor 
     - `EmailSchema`, `PasswordSchema`, `OutletDraftSchema`, `OutletCodeSchema`, `HHMMSchema`, `MenuItemDraftSchema` (image bytes max 2MB, mime JPEG/PNG/WebP), `UserDraftSchema`, `OutletAssignmentSchema`, `RawMaterialSchema`, `RawMaterialStockSchema`, `RecipeIngredientSchema`, `RecipeDraftSchema` (1..50 ingredients), `ReceivingDraftSchema`, `OpnameDraftSchema`, `TransactionDraftSchema`, `RefundContextSchema`, `WhatsappSchema`, `EmailContactSchema`, `DateRangeFilterSchema` (mulai <= akhir, max 12/24 bulan), `AuditLogFilterSchema`
     - Ekspor type via `z.infer`
     - _Requirements: 1.1, 3.2, 3.3, 4.1, 4.3, 4.4, 5.1, 5.2, 6.1, 6.2, 6.3, 6.6, 6.7, 6.8, 8.6, 9.2, 9.3, 14.3, 14.4_
-  - [ ] 3.2 Property test untuk validator (Property 16)
+  - [-] 3.2 Property test untuk validator (Property 16)
     - **Property 16: Entity validators** — semua schema menerima input valid dan menolak input dengan satu pelanggaran field; `schema.parse(schema.parse(x))` deterministik untuk input valid
     - **Validates: Requirements 3.2, 3.3, 4.1, 4.3, 4.4, 5.1, 5.2, 6.1, 6.2, 6.3, 6.6, 6.7, 6.8, 8.6, 9.2, 9.3, 14.3, 14.4**
     - File `src/domain/validators/__tests__/validators.property.test.ts`
-  - [ ] 3.3 Unit test contoh konkret untuk validator
+  - [x] 3.3 Unit test contoh konkret untuk validator
     - Email batas 5/254, password batas 8/128, outlet code 3/20 alfanumerik, HH:MM range, image > 2MB ditolak, recipe 0/51 ingredient ditolak
     - _Requirements: 1.1, 3.2, 5.1, 6.2_
 
 - [ ] 4. Domain - Auth, Session, Throttle, Route Guard, Storage Hygiene
-  - [ ] 4.1 Implementasi `authThrottle.ts` (Property 8)
+  - [x] 4.1 Implementasi `authThrottle.ts` (Property 8)
     - `recordFailure(state, now)`, `canAttempt(state, now)`, jendela 10 menit, backoff `min(2^(n-5)*1000, 300_000)` ms setelah 5 kegagalan
     - _Requirements: 1.6, 15.7, 15.8_
   - [x] 4.2 Implementasi `sessionExpiry.ts` (Property 7)
@@ -99,11 +99,11 @@ Setiap task merujuk ke requirement (Req X.Y) dan, untuk property test, ke nomor 
   - [x] 4.4 Implementasi `routeGuard.ts` (Property 6)
     - Konstanta `publicRoutes`, `adminRoutes`, fungsi `routeGuard(route, session)` mengembalikan `{kind:'allow'} | {kind:'redirect', to:string}`
     - _Requirements: 1.5, 2.5, 2.6, 14.5_
-  - [ ] 4.5 Implementasi `sessionStorageAdapter.ts` (Property 26)
+  - [x] 4.5 Implementasi `sessionStorageAdapter.ts` (Property 26)
     - `storeSession(session)` menulis hanya ke `sessionStorage` dengan key `yuzztea_session_*`; pastikan password tidak masuk; tidak menambahkan ke URL/hash
     - `clearSession()` menghapus semua key prefix tersebut
     - _Requirements: 1.4, 15.4, 15.5, 15.6_
-  - [ ] 4.6 Property tests untuk auth domain (Properties 5, 6, 7, 8, 26)
+  - [-] 4.6 Property tests untuk auth domain (Properties 5, 6, 7, 8, 26)
     - **Property 5: Authorization predicate** — Validates: Requirements 2.2, 2.3, 2.4, 2.5, 4.2, 4.5, 5.4, 14.5
     - **Property 6: Route guard determinism** — Validates: Requirements 1.5, 2.5, 2.6, 14.5
     - **Property 7: Idle session expiry** — Validates: Requirements 1.3
@@ -112,18 +112,18 @@ Setiap task merujuk ke requirement (Req X.Y) dan, untuk property test, ke nomor 
     - File: `src/domain/auth/__tests__/auth.property.test.ts`
 
 - [ ] 5. Domain - Cart Engine, Payment, Stock Helpers
-  - [ ] 5.1 Implementasi `cartEngine.ts`
+  - [x] 5.1 Implementasi `cartEngine.ts`
     - Tipe `CartLine`, `Discount`, `TaxRule`, `CartTotals`; fungsi `addLine`, `setQty`, `removeLine`, `clamp`, `computeTotals`
     - Aturan: subtotal int, total = max(0, subtotal-discount)+tax, tax floor((subtotal-discount)\*rate/100) saat aktif, kapasitas 100 baris (Req 7.2)
     - _Requirements: 7.2_
   - [x] 5.2 Implementasi `paymentValidator.ts`
     - `validatePayment({total, amountPaid, method})` → `Result<ConfirmedPayment, PaymentError>`; tunai: paid >= total; QRIS/transfer: paid === total; `changeDue(method, total, paid)` 0 untuk non-tunai
     - _Requirements: 7.3, 7.5, 7.6_
-  - [ ] 5.3 Property tests untuk cart & payment (Properties 1, 2)
+  - [-] 5.3 Property tests untuk cart & payment (Properties 1, 2)
     - **Property 1: Cart totals correctness** — Validates: Requirements 7.2
     - **Property 2: Payment validation** — Validates: Requirements 7.5, 7.6
     - File: `src/domain/cart/__tests__/cart.property.test.ts`
-  - [ ] 5.4 Unit test konkret cart edge cases
+  - [-] 5.4 Unit test konkret cart edge cases
     - 0 line → totals nol; diskon > subtotal → total 0; tax disabled → tax = 0; line ke-101 ditolak
     - _Requirements: 7.2_
 
@@ -131,13 +131,13 @@ Setiap task merujuk ke requirement (Req X.Y) dan, untuk property test, ke nomor 
   - [x] 6.1 Implementasi `recipeEngine.ts`
     - `requiredMaterials(recipes, lines)` agregasi qty per raw_material; `applyDeduction(stock, req)`, `applyRefund(stock, req)`, `checkAvailability(req, stock)` (Property 4)
     - _Requirements: 6.4, 6.9, 7.7, 7.10_
-  - [ ] 6.2 Implementasi `menuVisibility.ts` (Property 17)
+  - [x] 6.2 Implementasi `menuVisibility.ts` (Property 17)
     - `isVisibleInPos(menuItem, override?, outlet)` boolean; `effectivePrice(menuItem, override?)` integer; `effectiveMenuList(menus, overrides, outlet)` daftar terurut kategori
     - _Requirements: 3.4, 5.3, 5.5_
-  - [ ] 6.3 Implementasi `deleteWithHistory.ts` (Property 18)
+  - [x] 6.3 Implementasi `deleteWithHistory.ts` (Property 18)
     - `canDeleteMenuItem(menuItemId, transactionCount)` → `Result<true, 'MENU_HAS_TX_HISTORY'>`
     - _Requirements: 5.8_
-  - [ ] 6.4 Property tests untuk recipe & menu (Properties 3, 4, 17, 18)
+  - [-] 6.4 Property tests untuk recipe & menu (Properties 3, 4, 17, 18)
     - **Property 3: Stock deduction round-trip with refund** — Validates: Requirements 6.4, 7.7, 7.10
     - **Property 4: Stock shortfall reporting** — Validates: Requirements 6.9
     - **Property 17: Menu availability propagation** — Validates: Requirements 3.4, 5.3, 5.5
@@ -150,24 +150,24 @@ Setiap task merujuk ke requirement (Req X.Y) dan, untuk property test, ke nomor 
     - `formatReceipt(input, width: 58|58|80)` produce teks deterministik 32 cols (58mm) / 48 cols (80mm), word-aware wrap, label `REPRINT` + timestamp jika `reprint` ada (Req 8.8)
     - `formatReceipt` mengembalikan `Result.error('CURRENCY_FORMAT_FAILED')` tanpa teks parsial jika salah satu nilai mata uang gagal diformat (Req 8.9)
     - _Requirements: 8.1, 8.2, 8.3, 8.8, 8.9_
-  - [ ] 7.2 Implementasi `receiptShare.ts` & `printFailure.ts` (Property 15)
+  - [x] 7.2 Implementasi `receiptShare.ts` & `printFailure.ts` (Property 15)
     - `validateContact({whatsapp?, email?})` schema; `buildWaShareUrl`, `buildMailtoUrl`
     - `handlePrintFailure(tx)` → `{tx, action:'savePdf'}` tanpa mengubah `tx.status`
     - _Requirements: 8.5, 8.6, 8.7_
-  - [ ] 7.3 Property tests receipt (Properties 13, 14, 15)
+  - [-] 7.3 Property tests receipt (Properties 13, 14, 15)
     - **Property 13: Receipt content & width compliance** — Validates: Requirements 8.1, 8.2, 8.3, 8.9
     - **Property 14: Reprint preserves content** — Validates: Requirements 8.8
     - **Property 15: Print failure preserves transaction** — Validates: Requirements 8.5, 8.6, 8.7
     - File: `src/domain/receipt/__tests__/receipt.property.test.ts`
 
 - [ ] 8. Domain - Sync Queue, Realtime Reducer, Reconnect Backoff
-  - [ ] 8.1 Implementasi `syncQueue.ts` (Property 11)
+  - [x] 8.1 Implementasi `syncQueue.ts` (Property 11)
     - Tipe `PendingTx`, fungsi `enqueue(queue, tx)` (cap 500), `nextBatch(queue)` (sort by createdAt asc), `shouldRetry(tx)` (retryCount<5), `markRetry(tx)`, `markFailed(tx)`
     - _Requirements: 11.2, 11.3, 11.4, 11.6, 11.7_
   - [x] 8.2 Implementasi `priceConflictResolver.ts` (Property 12)
     - `resolveSync(localTx, currentMenuPrice)` → status `confirmed` jika sama; `conflict_review` dengan unitPrice lokal jika beda
     - _Requirements: 11.5_
-  - [ ] 8.3 Implementasi `reconnectBackoff.ts` (Property 9)
+  - [x] 8.3 Implementasi `reconnectBackoff.ts` (Property 9)
     - `nextReconnectDelay(attempt)` mengembalikan `[1000,2000,4000,8000,16000,30000,30000,30000,30000,30000]` untuk 1..10, `null` untuk >10
     - _Requirements: 10.4, 10.5_
   - [x] 8.4 Implementasi `realtimeReducer.ts` (Property 10)
@@ -192,10 +192,10 @@ Setiap task merujuk ke requirement (Req X.Y) dan, untuk property test, ke nomor 
     - `buildAuditEntry({user, role, outletId?, action_type, entity, entityId, valueBefore, valueAfter, now})` menghasilkan record dengan timestamp ISO 8601 Asia/Jakarta, truncate 2000 char, scrub `password|token` keys
     - `queryAuditLog(entries, filter)` paginated, default 30 hari, max 24 bulan, sort created_at desc, 50/halaman
     - _Requirements: 14.1, 14.2, 14.3, 14.4, 2.8, 3.5, 5.7_
-  - [ ] 9.4 Implementasi `glassContrast.ts` (Property 24)
+  - [x] 9.4 Implementasi `glassContrast.ts` (Property 24)
     - `contrastRatio(fg, bg)` (WCAG), `chooseSurface(fg, bg, fontSizePx)` → `'glass'|'solid'` sesuai Req 13.7
     - _Requirements: 13.2, 13.3, 13.7, 12.6_
-  - [ ] 9.5 Implementasi `draftRetention.ts` (Property 25)
+  - [x] 9.5 Implementasi `draftRetention.ts` (Property 25)
     - `mergeDraftOnResize(prevDraft, breakpointFromTo)` mempertahankan field non-submit; helper hook `useDraftPersistence(routeKey)` di Zustand
     - _Requirements: 12.7_
   - [ ] 9.6 Property tests reports/audit/UI helpers (Properties 19, 20, 21, 22, 23, 24, 25)
@@ -212,11 +212,11 @@ Setiap task merujuk ke requirement (Req X.Y) dan, untuk property test, ke nomor 
   - Jalankan `pnpm typecheck && pnpm test` (semua property test domain harus lulus minimal 100 runs, properti kritikal 500). Ensure all tests pass, ask the user if questions arise.
 
 - [ ] 11. Data layer dasar (Supabase + Dexie + repositories)
-  - [ ] 11.1 Setup Dexie database `src/data/db.ts`
+  - [x] 11.1 Setup Dexie database `src/data/db.ts`
     - Stores: `cache_menu_items`, `cache_outlets`, `cache_recipes`, `cache_stock`, `pending_sync`, `failed_sync`, `drafts` (form draft retention)
     - Versioning + index `outletId`, `createdAt`
     - _Requirements: 11.1, 11.2, 11.4, 12.7_
-  - [ ] 11.2 TanStack Query setup + retry policy global
+  - [x] 11.2 TanStack Query setup + retry policy global
     - `src/lib/queryClient.ts` dengan `staleTime` dan retry exponential terbatas; integrasi dengan `ConnectionState`
     - _Requirements: 10.6, 11.1_
   - [ ] 11.3 Repository: Auth/Session
@@ -265,7 +265,7 @@ Setiap task merujuk ke requirement (Req X.Y) dan, untuk property test, ke nomor 
   - [ ] 12.5 Implementasi `<PrintButton>` + helper PDF
     - Memicu `window.print()` dengan timeout 5s; jika tidak tersedia → fallback `jsPDF` simpan PDF; tidak mengubah `tx.status`
     - _Requirements: 8.4, 8.5_
-  - [ ] 12.6 Theme provider + dark mode toggle + `prefers-reduced-motion` adapter
+  - [x] 12.6 Theme provider + dark mode toggle + `prefers-reduced-motion` adapter
     - Persistensi preferensi di `localStorage` (bukan token); media query `prefers-color-scheme`; matikan animasi parallax/blur saat reduced motion
     - _Requirements: 13.4, 13.6_
   - [ ] 12.7 Component tests (Testing Library)
