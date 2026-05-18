@@ -50,12 +50,12 @@ Setiap task merujuk ke requirement (Req X.Y) dan, untuk property test, ke nomor 
     - File `supabase/migrations/0003_tx_audit.sql`: transaction (enum status lengkap termasuk pending_sync/conflict_review, check `subtotal-discount+tax = total`), transaction_line (snapshot price), refund (unique per transaction_id), stock_receiving, stock_opname dengan diff computed, audit_log insert-only
     - Indeks pada `outlet_id`, `created_at desc`, `cashier_user_id`, `(menu_item_id, created_at)` untuk top-N
     - _Requirements: 5.7, 6.6, 6.7, 7.4, 7.10, 14.2_
-  - [ ] 2.4 RLS policies untuk semua tabel multi-tenant
+  - [x] 2.4 RLS policies untuk semua tabel multi-tenant
     - Helper SQL: `current_org()`, `current_role_norm()`, `current_active_outlet_ids()`
     - Policy SELECT/INSERT/UPDATE/DELETE per tabel sesuai matriks (Owner=org-wide, Manager/Cashier=outlet IN assignment, audit_log SELECT owner only, UPDATE/DELETE blocked)
     - Test SQL fixture mendemonstrasikan isolasi (digunakan integration test)
     - _Requirements: 2.2, 2.3, 2.4, 2.7, 2.8, 14.5, 14.6, 15.2_
-  - [ ] 2.5 SECURITY DEFINER functions untuk operasi atomic
+  - [x] 2.5 SECURITY DEFINER functions untuk operasi atomic
     - `create_transaction(payload jsonb)`: insert tx + tx_lines + dec stok + insert audit (jika refund) dalam satu transaksi; mengembalikan id tx atau error spesifik. Jika trigger Inventory_System gagal di-fire (tidak dapat dipanggil sama sekali), seluruh transaksi di-rollback dan return `INVENTORY_TRIGGER_FAILED` (Req 7.7).
     - `refund_transaction(tx_id uuid)`: cek 24h window + status confirmed + belum refunded; insert refund, ubah status, kembalikan stok, insert audit
     - `update_menu_price(menu_item_id uuid, outlet_id uuid?, new_price int)`: UPDATE harga dan INSERT menu_price_history dalam satu transaksi Postgres; rollback UPDATE jika INSERT history gagal (Req 5.7, 5.9)
@@ -63,12 +63,12 @@ Setiap task merujuk ke requirement (Req X.Y) dan, untuk property test, ke nomor 
     - `record_audit(payload jsonb)`: insert ke audit_log dengan validasi (entity, action_type whitelist), truncate value_before/value_after ke 2000 char; **selalu** menerima entri terlepas dari `accessDenied` flag (Req 14.1)
     - `log_unauthorized_outlet_attempt(outlet_id uuid, action text)` insert audit "auth.unauthorized_outlet"
     - _Requirements: 2.10, 5.7, 5.9, 6.4, 7.7, 7.8, 7.10, 7.11, 14.1, 14.2, 14.6, 2.8_
-  - [ ] 2.6 Trigger menu price history dan outlet hours history
+  - [x] 2.6 Trigger menu price history dan outlet hours history
     - Trigger `BEFORE UPDATE` pada `menu_item` / `menu_item_outlet` insert ke `menu_price_history` jika harga berubah; retensi 24 bulan via cron pg_cron atau view `WHERE effective_at >= now() - interval '24 months'`
     - Catatan: untuk perubahan harga, gunakan RPC `update_menu_price` (lihat task 2.5) yang membungkus UPDATE + INSERT menu_price_history dalam satu transaksi sehingga kegagalan INSERT membatalkan UPDATE (Req 5.9). Trigger digunakan sebagai safety net jika UPDATE dilakukan langsung di tabel.
     - Trigger pada `outlet` saat jam berubah → insert `outlet_hours_history` (retensi 365 hari)
     - _Requirements: 3.5, 5.7, 5.9_
-  - [ ] 2.7 Realtime publication setup
+  - [x] 2.7 Realtime publication setup
     - `ALTER PUBLICATION supabase_realtime ADD TABLE transaction, transaction_line, raw_material_stock, menu_item_outlet, menu_item;`
     - Pastikan replikasi mengikuti RLS via row filter publication (Postgres 15+)
     - _Requirements: 10.1, 10.2_
@@ -96,7 +96,7 @@ Setiap task merujuk ke requirement (Req X.Y) dan, untuk property test, ke nomor 
   - [x] 4.3 Implementasi `authorize.ts` predikat (Property 5)
     - Tipe `Role`, `ResourceScope`, fungsi `authorize({role, userOutletIds, scope, requestedOutletId})` dengan tabel keputusan (Owner/Manager/Cashier × pos/management/audit)
     - _Requirements: 2.2, 2.3, 2.4, 2.5, 4.2, 4.5, 5.4, 14.5_
-  - [ ] 4.4 Implementasi `routeGuard.ts` (Property 6)
+  - [x] 4.4 Implementasi `routeGuard.ts` (Property 6)
     - Konstanta `publicRoutes`, `adminRoutes`, fungsi `routeGuard(route, session)` mengembalikan `{kind:'allow'} | {kind:'redirect', to:string}`
     - _Requirements: 1.5, 2.5, 2.6, 14.5_
   - [ ] 4.5 Implementasi `sessionStorageAdapter.ts` (Property 26)
@@ -116,7 +116,7 @@ Setiap task merujuk ke requirement (Req X.Y) dan, untuk property test, ke nomor 
     - Tipe `CartLine`, `Discount`, `TaxRule`, `CartTotals`; fungsi `addLine`, `setQty`, `removeLine`, `clamp`, `computeTotals`
     - Aturan: subtotal int, total = max(0, subtotal-discount)+tax, tax floor((subtotal-discount)\*rate/100) saat aktif, kapasitas 100 baris (Req 7.2)
     - _Requirements: 7.2_
-  - [ ] 5.2 Implementasi `paymentValidator.ts`
+  - [x] 5.2 Implementasi `paymentValidator.ts`
     - `validatePayment({total, amountPaid, method})` → `Result<ConfirmedPayment, PaymentError>`; tunai: paid >= total; QRIS/transfer: paid === total; `changeDue(method, total, paid)` 0 untuk non-tunai
     - _Requirements: 7.3, 7.5, 7.6_
   - [ ] 5.3 Property tests untuk cart & payment (Properties 1, 2)
@@ -128,7 +128,7 @@ Setiap task merujuk ke requirement (Req X.Y) dan, untuk property test, ke nomor 
     - _Requirements: 7.2_
 
 - [ ] 6. Domain - Recipe Engine, Stock Shortfall, Menu Propagation
-  - [ ] 6.1 Implementasi `recipeEngine.ts`
+  - [x] 6.1 Implementasi `recipeEngine.ts`
     - `requiredMaterials(recipes, lines)` agregasi qty per raw_material; `applyDeduction(stock, req)`, `applyRefund(stock, req)`, `checkAvailability(req, stock)` (Property 4)
     - _Requirements: 6.4, 6.9, 7.7, 7.10_
   - [ ] 6.2 Implementasi `menuVisibility.ts` (Property 17)
@@ -145,7 +145,7 @@ Setiap task merujuk ke requirement (Req X.Y) dan, untuk property test, ke nomor 
     - File: `src/domain/inventory/__tests__/recipe.property.test.ts`
 
 - [ ] 7. Domain - Receipt Formatter
-  - [ ] 7.1 Implementasi `receiptFormatter.ts`
+  - [x] 7.1 Implementasi `receiptFormatter.ts`
     - `formatRupiah(n)` locale id-ID tanpa desimal, mengembalikan `Result<string, 'CURRENCY_FORMAT_FAILED'>`; `formatJakartaTime(d)` `DD/MM/YYYY HH:mm:ss`
     - `formatReceipt(input, width: 58|58|80)` produce teks deterministik 32 cols (58mm) / 48 cols (80mm), word-aware wrap, label `REPRINT` + timestamp jika `reprint` ada (Req 8.8)
     - `formatReceipt` mengembalikan `Result.error('CURRENCY_FORMAT_FAILED')` tanpa teks parsial jika salah satu nilai mata uang gagal diformat (Req 8.9)
@@ -170,7 +170,7 @@ Setiap task merujuk ke requirement (Req X.Y) dan, untuk property test, ke nomor 
   - [ ] 8.3 Implementasi `reconnectBackoff.ts` (Property 9)
     - `nextReconnectDelay(attempt)` mengembalikan `[1000,2000,4000,8000,16000,30000,30000,30000,30000,30000]` untuk 1..10, `null` untuk >10
     - _Requirements: 10.4, 10.5_
-  - [ ] 8.4 Implementasi `realtimeReducer.ts` (Property 10)
+  - [x] 8.4 Implementasi `realtimeReducer.ts` (Property 10)
     - `handlePayload(state, payload, schema, logger)` — validasi via Zod; payload invalid → state tidak berubah, logger.error dipanggil tepat sekali
     - Schema payload: `RealtimeTransactionPayload`, `RealtimeStockPayload`, `RealtimeMenuPayload`
     - _Requirements: 10.7_
@@ -182,13 +182,13 @@ Setiap task merujuk ke requirement (Req X.Y) dan, untuk property test, ke nomor 
     - File: `src/domain/sync/__tests__/sync.property.test.ts`
 
 - [ ] 9. Domain - Reports, Audit, Glass Contrast, Draft Retention
-  - [ ] 9.1 Implementasi `reportAggregator.ts` (Properties 19, 20)
+  - [x] 9.1 Implementasi `reportAggregator.ts` (Properties 19, 20)
     - `aggregate(transactions)` → `{total, count, average, byMethod}`; `topN(items, n=5)` deterministik dengan tie-break A-Z locale id-ID
     - _Requirements: 9.1, 9.4, 9.6, 9.7_
-  - [ ] 9.2 Implementasi `csvExport.ts` (Property 21)
+  - [x] 9.2 Implementasi `csvExport.ts` (Property 21)
     - `buildSummaryCsv(rows, schema)` & `buildDetailCsv(rows, schema)` mengikuti RFC 4180; header tetap antar export
     - _Requirements: 9.8_
-  - [ ] 9.3 Implementasi `auditEntry.ts` (Properties 22, 23)
+  - [x] 9.3 Implementasi `auditEntry.ts` (Properties 22, 23)
     - `buildAuditEntry({user, role, outletId?, action_type, entity, entityId, valueBefore, valueAfter, now})` menghasilkan record dengan timestamp ISO 8601 Asia/Jakarta, truncate 2000 char, scrub `password|token` keys
     - `queryAuditLog(entries, filter)` paginated, default 30 hari, max 24 bulan, sort created_at desc, 50/halaman
     - _Requirements: 14.1, 14.2, 14.3, 14.4, 2.8, 3.5, 5.7_
